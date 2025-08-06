@@ -1,0 +1,286 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Django Rubik's Cube Solver</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            background-color: #121212;
+            color: #e0e0e0;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            padding-top: 2rem;
+        }
+
+        #main-container {
+            display: flex;
+            gap: 2rem;
+            align-items: flex-start;
+        }
+
+        #cube-container {
+            width: 60vw;
+            max-width: 600px;
+            height: 60vh;
+            max-height: 600px;
+            border: 1px solid #333;
+            border-radius: 8px;
+        }
+
+        #controls {
+            width: 200px;
+        }
+
+        #color-palette {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-bottom: 1rem;
+        }
+
+        .color-box {
+            width: 50px;
+            height: 50px;
+            border: 2px solid #555;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: transform 0.2s;
+            /* Added styles for the letter */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 2rem;
+            font-weight: bold;
+            color: rgba(0, 0, 0, 0.4);
+            /* Semi-transparent black for contrast */
+            text-shadow: 0 0 3px rgba(255, 255, 255, 0.3);
+            /* Slight glow for readability */
+        }
+
+        .color-box:hover {
+            transform: scale(1.1);
+        }
+
+        .color-box.selected {
+            border-color: #00aaff;
+            box-shadow: 0 0 10px #00aaff;
+        }
+
+        button {
+            width: 100%;
+            padding: 10px;
+            font-size: 1rem;
+            border-radius: 5px;
+            border: none;
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+            margin-top: 1rem;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        #flip-view-btn {
+            background-color: #28a745;
+        }
+
+        #flip-view-btn:hover {
+            background-color: #218838;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="main-container">
+        <div id="cube-container"></div>
+        <div id="controls">
+            <h3>Color Palette</h3>
+            <div id="color-palette"></div>
+            <button id="flip-view-btn">View Other Side</button>
+            <button id="solve-btn">Solve Cube</button>
+            <p style="font-size: 0.8rem; color: #888; margin-top: 2rem;">
+                Click stickers to color.<br>
+                Center pieces are locked.<br>
+                Standard: White=Up, Green=Front.
+            </p>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const container = document.getElementById('cube-container');
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x121212);
+            const camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
+            const renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            container.appendChild(renderer.domElement);
+            camera.position.set(4, 4, 4);
+            camera.lookAt(0, 0, 0);
+            scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(5, 10, 7.5);
+            scene.add(dirLight);
+
+            const COLORS = {
+                white: 0xffffff,
+                yellow: 0xffff00,
+                blue: 0x0000ff,
+                green: 0x008000,
+                red: 0x9E4242,
+                orange: 0xffb84d
+            };
+            const COLOR_NAMES = Object.keys(COLORS);
+            let selectedColor = 'white';
+            const cubeGroup = new THREE.Group();
+            const allStickers = [];
+            const stickerMaterials = {};
+            for (const color in COLORS) {
+                stickerMaterials[color] = new THREE.MeshLambertMaterial({ color: COLORS[color] });
+            }
+            const stickerGeometry = new THREE.PlaneGeometry(0.9, 0.9);
+
+            function createSticker(color, position, rotation, face, isCenter = false) {
+                const sticker = new THREE.Mesh(stickerGeometry, stickerMaterials[color]);
+                sticker.position.set(position.x, position.y, position.z);
+                sticker.rotation.set(rotation.x, rotation.y, rotation.z);
+                sticker.userData = { color: color, face: face, isCenter: isCenter };
+                allStickers.push(sticker);
+                return sticker;
+            }
+
+            const faceDefinitions = [
+                { id: 'U', axis: 'y', val: 1, pos: { y: 0.51 }, rot: { x: -Math.PI / 2 }, color: 'white' },
+                { id: 'D', axis: 'y', val: -1, pos: { y: -0.51 }, rot: { x: Math.PI / 2 }, color: 'yellow' },
+                { id: 'R', axis: 'x', val: 1, pos: { x: 0.51 }, rot: { y: Math.PI / 2 }, color: 'red' },
+                { id: 'L', axis: 'x', val: -1, pos: { x: -0.51 }, rot: { y: -Math.PI / 2 }, color: 'orange' },
+                { id: 'F', axis: 'z', val: 1, pos: { z: 0.51 }, rot: { x: 0, y: 0, z: 0 }, color: 'green' },
+                { id: 'B', axis: 'z', val: -1, pos: { z: -0.51 }, rot: { x: Math.PI, y: 0, z: 0 }, color: 'blue' }
+            ];
+
+            for (let x = -1; x <= 1; x++) {
+                for (let y = -1; y <= 1; y++) {
+                    for (let z = -1; z <= 1; z++) {
+                        if (Math.abs(x) + Math.abs(y) + Math.abs(z) === 0) continue;
+                        const cubie = new THREE.Group();
+                        cubie.position.set(x, y, z);
+                        for (const def of faceDefinitions) {
+                            if ({ x, y, z }[def.axis] === def.val) {
+                                const pos = { x: def.pos.x || 0, y: def.pos.y || 0, z: def.pos.z || 0 };
+                                const rot = { x: def.rot.x || 0, y: def.rot.y || 0, z: def.rot.z || 0 };
+                                const isCenter = Math.abs(x) + Math.abs(y) + Math.abs(z) === 1;
+                                cubie.add(createSticker(def.color, pos, rot, def.id, isCenter));
+                            }
+                        }
+                        cubeGroup.add(cubie);
+                    }
+                }
+            }
+            scene.add(cubeGroup);
+
+            const palette = document.getElementById('color-palette');
+            COLOR_NAMES.forEach(color => {
+                const box = document.createElement('div');
+                box.className = 'color-box';
+                box.style.backgroundColor = `#${COLORS[color].toString(16).padStart(6, '0')}`;
+                // ADDED THIS LINE to put the letter in the box
+                box.innerText = color.charAt(0).toUpperCase();
+                if (color === selectedColor) box.classList.add('selected');
+                box.addEventListener('click', () => {
+                    selectedColor = color;
+                    document.querySelectorAll('.color-box').forEach(b => b.classList.remove('selected'));
+                    box.classList.add('selected');
+                });
+                palette.appendChild(box);
+            });
+
+            const raycaster = new THREE.Raycaster();
+            const mouse = new THREE.Vector2();
+            container.addEventListener('click', event => {
+                const rect = renderer.domElement.getBoundingClientRect();
+                mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+                mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObjects(allStickers);
+                if (intersects.length > 0) {
+                    const sticker = intersects[0].object;
+                    if (!sticker.userData.isCenter) {
+                        sticker.material = stickerMaterials[selectedColor];
+                        sticker.userData.color = selectedColor;
+                    }
+                }
+            });
+
+            let isFlipped = false;
+            const flipBtn = document.getElementById('flip-view-btn');
+            flipBtn.addEventListener('click', () => {
+                isFlipped = !isFlipped;
+                camera.position.set(isFlipped ? -4 : 4, isFlipped ? -4 : 4, isFlipped ? -4 : 4);
+                camera.lookAt(0, 0, 0);
+            });
+
+            function sortFace(face, stickers) {
+                switch (face) {
+                    case 'U': return stickers.sort((a, b) => (a.parent.position.z - b.parent.position.z) || (a.parent.position.x - b.parent.position.x));
+                    case 'R': return stickers.sort((a, b) => (b.parent.position.y - a.parent.position.y) || (b.parent.position.z - a.parent.position.z));
+                    case 'F': return stickers.sort((a, b) => (b.parent.position.y - a.parent.position.y) || (a.parent.position.x - b.parent.position.x));
+                    case 'D': return stickers.sort((a, b) => (b.parent.position.z - a.parent.position.z) || (a.parent.position.x - b.parent.position.x));
+                    case 'L': return stickers.sort((a, b) => (b.parent.position.y - a.parent.position.y) || (a.parent.position.z - b.parent.position.z));
+                    case 'B': return stickers.sort((a, b) => (b.parent.position.y - a.parent.position.y) || (b.parent.position.x - a.parent.position.x));
+
+                    default: return stickers;
+                }
+            }
+
+            function extractCubeState() {
+                const faceNames = ['U', 'R', 'F', 'D', 'L', 'B'];
+                const state = {};
+                for (const face of faceNames) {
+                    const stickersForFace = allStickers.filter(s => s.userData.face === face);
+                    const sortedStickers = sortFace(face, stickersForFace);
+                    if (sortedStickers.length !== 9) {
+                        alert(`Error: Face ${face} has ${sortedStickers.length} stickers, but should have 9.`);
+                        return null;
+                    }
+                    state[face] = sortedStickers.map(sticker => sticker.userData.color);
+                }
+                return state;
+            }
+
+            document.getElementById('solve-btn').addEventListener('click', async () => {
+                const cubeState = extractCubeState();
+                if (!cubeState) return;
+
+                const response = await fetch("{% url 'cube_solver:solve_cube_api' %}", {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+                    body: JSON.stringify({ state: cubeState })
+                });
+                const result = await response.json();
+                if (result.status === 'success') {
+                    window.location.href = result.redirect_url;
+                } else {
+                    const errorMessage = result.error || 'Could not solve.';
+                    const defString = result.definition_string ? `\n\nGenerated String:\n${result.definition_string}` : '';
+                    alert(`Error: ${errorMessage}${defString}`);
+                }
+            });
+
+            (function animate() {
+                requestAnimationFrame(animate);
+                renderer.render(scene, camera);
+            })();
+        });
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,582 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Django Rubik's Cube Solver</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            background-color: #121212;
+            color: #e0e0e0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            /* Center the main container */
+            padding-top: 2rem;
+            flex-direction: column;
+            /* Stack items vertically */
+        }
+
+        #main-container {
+            display: flex;
+            flex-direction: column;
+            /* Stack top-row and camera vertically */
+            gap: 2rem;
+            align-items: center;
+            width: 100%;
+            max-width: 900px;
+            /* Give the layout a max width */
+        }
+
+        #top-row {
+            display: flex;
+            gap: 2rem;
+            align-items: flex-start;
+            justify-content: center;
+            width: 100%;
+        }
+
+        #cube-container {
+            width: 50vw;
+            max-width: 400px;
+            height: 40vh;
+            max-height: 400px;
+            border: 1px solid #333;
+            border-radius: 8px;
+        }
+
+        #controls {
+            width: 200px;
+        }
+
+        #color-palette {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-bottom: 1rem;
+        }
+
+        .color-box {
+            width: 50px;
+            height: 50px;
+            border: 2px solid #555;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: transform 0.2s;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 2rem;
+            font-weight: bold;
+            color: rgba(0, 0, 0, 0.4);
+            text-shadow: 0 0 3px rgba(255, 255, 255, 0.3);
+        }
+
+        .color-box:hover {
+            transform: scale(1.1);
+        }
+
+        .color-box.selected {
+            border-color: #00aaff;
+            box-shadow: 0 0 10px #00aaff;
+        }
+
+        button {
+            width: 100%;
+            padding: 10px;
+            font-size: 1rem;
+            border-radius: 5px;
+            border: none;
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+            margin-top: 1rem;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        #flip-view-btn,
+        #start-camera-btn {
+            background-color: #28a745;
+        }
+
+        #flip-view-btn:hover,
+        #start-camera-btn:hover {
+            background-color: #218838;
+        }
+
+        #capture-face-btn,
+        #stop-camera-btn {
+            background-color: #dc3545;
+        }
+
+        #capture-face-btn:hover,
+        #stop-camera-btn:hover {
+            background-color: #c82333;
+        }
+
+        #camera-controls,
+        #text-controls {
+            width: 100%;
+            max-width: 620px;
+            /* Match the width of the top row */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        #camera-container {
+            position: relative;
+            width: 100%;
+            max-width: 400px;
+            /* Give the camera a max width */
+            margin-top: 1rem;
+        }
+
+        #camera-feed,
+        #camera-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            border-radius: 8px;
+        }
+
+        #camera-feed {
+            display: none;
+            z-index: 1;
+            transform: scaleX(-1);
+            /* Invert video feed horizontally */
+        }
+
+        #camera-overlay {
+            z-index: 2;
+            pointer-events: none;
+            /* Make overlay non-interactive */
+        }
+
+        #face-text-input {
+            width: 100%;
+            max-width: 400px;
+            padding: 8px;
+            margin-top: 1rem;
+            border-radius: 5px;
+            border: 1px solid #555;
+            background-color: #2a2a2a;
+            color: #e0e0e0;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 1.2rem;
+            text-align: center;
+            text-transform: uppercase;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="main-container">
+        <div id="top-row">
+            <div id="cube-container"></div>
+            <div id="controls">
+                <h3>Color Palette</h3>
+                <div id="color-palette"></div>
+                <button id="flip-view-btn">View Other Side</button>
+                <button id="solve-btn">Solve Cube</button>
+                <p id="manual-instructions" style="font-size: 0.8rem; color: #888; margin-top: 2rem;">
+                    Click stickers to color.<br>
+                    Center pieces are locked.<br>
+                    Standard: White=Up, Green=Front.
+                </p>
+            </div>
+        </div>
+        <div id="camera-controls">
+            <h3>Camera Input</h3>
+            <button id="start-camera-btn">Start Camera</button>
+            <button id="stop-camera-btn" style="display: none;">Stop Camera</button>
+            <div id="camera-container">
+                <video id="camera-feed" autoplay playsinline></video>
+                <canvas id="camera-overlay"></canvas>
+            </div>
+            <canvas id="capture-canvas" style="display:none;"></canvas>
+            <button id="capture-face-btn" disabled style="max-width: 400px; display: none;">Capture Face
+                (Space)</button>
+        </div>
+        <div id="text-controls">
+            <h3>Text Input</h3>
+            <input type="text" id="face-text-input" maxlength="9" placeholder="e.g., Y G O O G R W G B">
+            <button id="apply-text-btn" style="max-width: 400px;">Apply Text to Face</button>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const container = document.getElementById('cube-container');
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x121212);
+            const camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
+            const renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            container.appendChild(renderer.domElement);
+            camera.position.set(4, 4, 4);
+            camera.lookAt(0, 0, 0);
+            scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(5, 10, 7.5);
+            scene.add(dirLight);
+
+            const COLORS = {
+                white: { hex: 0xffffff, rgb: [255, 255, 255], face: 'U', char: 'W' },
+                yellow: { hex: 0xffff00, rgb: [255, 255, 0], face: 'D', char: 'Y' },
+                blue: { hex: 0x0000ff, rgb: [0, 0, 255], face: 'B', char: 'B' },
+                green: { hex: 0x008000, rgb: [0, 128, 0], face: 'F', char: 'G' },
+                red: { hex: 0x9E4242, rgb: [158, 66, 66], face: 'R', char: 'R' },
+                orange: { hex: 0xffb84d, rgb: [255, 184, 77], face: 'L', char: 'O' }
+            };
+            const COLOR_NAMES = Object.keys(COLORS);
+            let selectedColor = 'white';
+            const cubeGroup = new THREE.Group();
+            const allStickers = [];
+            const stickerMaterials = {};
+            for (const color in COLORS) {
+                stickerMaterials[color] = new THREE.MeshLambertMaterial({ color: COLORS[color].hex });
+            }
+            const stickerGeometry = new THREE.PlaneGeometry(0.9, 0.9);
+
+            function createSticker(color, position, rotation, face, isCenter = false) {
+                const sticker = new THREE.Mesh(stickerGeometry, stickerMaterials[color]);
+                sticker.position.set(position.x, position.y, position.z);
+                sticker.rotation.set(rotation.x, rotation.y, rotation.z);
+                sticker.userData = { color: color, face: face, isCenter: isCenter };
+                allStickers.push(sticker);
+                return sticker;
+            }
+
+            const faceDefinitions = [
+                { id: 'U', axis: 'y', val: 1, pos: { y: 0.51 }, rot: { x: -Math.PI / 2 }, color: 'white' },
+                { id: 'D', axis: 'y', val: -1, pos: { y: -0.51 }, rot: { x: Math.PI / 2 }, color: 'yellow' },
+                { id: 'R', axis: 'x', val: 1, pos: { x: 0.51 }, rot: { y: Math.PI / 2 }, color: 'red' },
+                { id: 'L', axis: 'x', val: -1, pos: { x: -0.51 }, rot: { y: -Math.PI / 2 }, color: 'orange' },
+                { id: 'F', axis: 'z', val: 1, pos: { z: 0.51 }, rot: { x: 0, y: 0, z: 0 }, color: 'green' },
+                { id: 'B', axis: 'z', val: -1, pos: { z: -0.51 }, rot: { x: Math.PI, y: 0, z: 0 }, color: 'blue' }
+            ];
+
+            for (let x = -1; x <= 1; x++) {
+                for (let y = -1; y <= 1; y++) {
+                    for (let z = -1; z <= 1; z++) {
+                        if (Math.abs(x) + Math.abs(y) + Math.abs(z) === 0) continue;
+                        const cubie = new THREE.Group();
+                        cubie.position.set(x, y, z);
+                        for (const def of faceDefinitions) {
+                            if ({ x, y, z }[def.axis] === def.val) {
+                                const pos = { x: def.pos.x || 0, y: def.pos.y || 0, z: def.pos.z || 0 };
+                                const rot = { x: def.rot.x || 0, y: def.rot.y || 0, z: def.rot.z || 0 };
+                                const isCenter = Math.abs(x) + Math.abs(y) + Math.abs(z) === 1;
+                                cubie.add(createSticker(def.color, pos, rot, def.id, isCenter));
+                            }
+                        }
+                        cubeGroup.add(cubie);
+                    }
+                }
+            }
+            scene.add(cubeGroup);
+
+            const palette = document.getElementById('color-palette');
+            COLOR_NAMES.forEach(color => {
+                const box = document.createElement('div');
+                box.className = 'color-box';
+                box.style.backgroundColor = `#${COLORS[color].hex.toString(16).padStart(6, '0')}`;
+                box.innerText = color.charAt(0).toUpperCase();
+                if (color === selectedColor) box.classList.add('selected');
+                box.addEventListener('click', () => {
+                    selectedColor = color;
+                    document.querySelectorAll('.color-box').forEach(b => b.classList.remove('selected'));
+                    box.classList.add('selected');
+                });
+                palette.appendChild(box);
+            });
+
+            const raycaster = new THREE.Raycaster();
+            const mouse = new THREE.Vector2();
+            container.addEventListener('click', event => {
+                const rect = renderer.domElement.getBoundingClientRect();
+                mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+                mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObjects(allStickers);
+                if (intersects.length > 0) {
+                    const sticker = intersects[0].object;
+                    if (!sticker.userData.isCenter) {
+                        sticker.material = stickerMaterials[selectedColor];
+                        sticker.userData.color = selectedColor;
+                    }
+                }
+            });
+
+            let isFlipped = false;
+            const flipBtn = document.getElementById('flip-view-btn');
+            flipBtn.addEventListener('click', () => {
+                isFlipped = !isFlipped;
+                camera.position.set(isFlipped ? -4 : 4, isFlipped ? -4 : 4, isFlipped ? -4 : 4);
+                camera.lookAt(0, 0, 0);
+            });
+
+            // --- TEXT INPUT LOGIC ---
+            const applyTextBtn = document.getElementById('apply-text-btn');
+            const textInput = document.getElementById('face-text-input');
+
+            applyTextBtn.addEventListener('click', () => {
+                const inputText = textInput.value.toUpperCase().replace(/\s/g, ''); // Remove spaces
+                if (inputText.length !== 9) {
+                    alert("Input must be exactly 9 characters long.");
+                    return;
+                }
+                const validChars = /^[RGBOYW]{9}$/;
+                if (!validChars.test(inputText)) {
+                    alert("Input contains invalid characters. Use only R, G, B, O, Y, W.");
+                    return;
+                }
+
+                const centerChar = inputText[4];
+                const charToColorMap = { 'W': 'white', 'Y': 'yellow', 'B': 'blue', 'G': 'green', 'R': 'red', 'O': 'orange' };
+                const centerColor = charToColorMap[centerChar];
+
+                if (!centerColor) {
+                    alert("Invalid center piece character.");
+                    return;
+                }
+
+                const detectedFace = COLORS[centerColor].face;
+                const detectedColors = inputText.split('').map(char => charToColorMap[char]);
+
+                applyDetectedColors(detectedColors, detectedFace);
+            });
+
+
+            // --- CAMERA LOGIC ---
+            const startCameraBtn = document.getElementById('start-camera-btn');
+            const stopCameraBtn = document.getElementById('stop-camera-btn');
+            const captureFaceBtn = document.getElementById('capture-face-btn');
+            const video = document.getElementById('camera-feed');
+            const captureCanvas = document.getElementById('capture-canvas');
+            const overlayCanvas = document.getElementById('camera-overlay');
+            const manualControls = document.getElementById('controls');
+            const manualInstructions = document.getElementById('manual-instructions');
+
+            startCameraBtn.addEventListener('click', async () => {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                    video.srcObject = stream;
+                    video.style.display = 'block';
+                    startCameraBtn.style.display = 'none';
+                    stopCameraBtn.style.display = 'block';
+                    captureFaceBtn.style.display = 'block';
+                    captureFaceBtn.disabled = false;
+                    manualControls.style.display = 'none';
+                    manualInstructions.style.display = 'none';
+                    textInput.parentElement.style.display = 'none'; // Hide text input
+
+                    video.onloadedmetadata = () => {
+                        const videoAspectRatio = video.videoWidth / video.videoHeight;
+                        overlayCanvas.width = overlayCanvas.clientWidth;
+                        overlayCanvas.height = overlayCanvas.clientWidth / videoAspectRatio;
+                        drawOverlay();
+                    };
+
+                } catch (err) {
+                    console.error("Error accessing camera: ", err);
+                    alert("Could not access the camera. Please ensure you have a webcam enabled and have granted permission.");
+                }
+            });
+
+            stopCameraBtn.addEventListener('click', () => {
+                const stream = video.srcObject;
+                if (stream) {
+                    const tracks = stream.getTracks();
+                    tracks.forEach(track => track.stop());
+                }
+                video.srcObject = null;
+                video.style.display = 'none';
+
+                const ctx = overlayCanvas.getContext('2d');
+                ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+                startCameraBtn.style.display = 'block';
+                stopCameraBtn.style.display = 'none';
+                captureFaceBtn.style.display = 'none';
+                captureFaceBtn.disabled = true;
+                manualControls.style.display = 'block';
+                manualInstructions.style.display = 'block';
+                textInput.parentElement.style.display = 'flex'; // Show text input
+            });
+
+            function drawOverlay() {
+                const ctx = overlayCanvas.getContext('2d');
+                const width = overlayCanvas.width;
+                const height = overlayCanvas.height;
+                const size = Math.min(width, height) * 0.8;
+                const offsetX = (width - size) / 2;
+                const offsetY = (height - size) / 2;
+
+                ctx.clearRect(0, 0, width, height);
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+                ctx.lineWidth = 2;
+
+                const samplePoints = getSamplePoints(size, offsetX, offsetY);
+
+                ctx.beginPath();
+                ctx.moveTo(offsetX + size / 3, offsetY); ctx.lineTo(offsetX + size / 3, offsetY + size);
+                ctx.moveTo(offsetX + (2 * size) / 3, offsetY); ctx.lineTo(offsetX + (2 * size) / 3, offsetY + size);
+                ctx.moveTo(offsetX, offsetY + size / 3); ctx.lineTo(offsetX + size, offsetY + size / 3);
+                ctx.moveTo(offsetX, offsetY + (2 * size) / 3); ctx.lineTo(offsetX + size, offsetY + (2 * size) / 3);
+                ctx.stroke();
+
+                ctx.fillStyle = 'rgba(255, 0, 0, 0.7)';
+                samplePoints.forEach(p => {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 5, 0, 2 * Math.PI);
+                    ctx.fill();
+                });
+            }
+
+            function getSamplePoints(size, offsetX, offsetY) {
+                const points = [];
+                for (let row = 0; row < 3; row++) {
+                    for (let col = 0; col < 3; col++) {
+                        points.push({
+                            x: offsetX + (size / 6) + (col * size / 3),
+                            y: offsetY + (size / 6) + (row * size / 3)
+                        });
+                    }
+                }
+                return points;
+            }
+
+            captureFaceBtn.addEventListener('click', () => {
+                const context = captureCanvas.getContext('2d');
+                captureCanvas.width = video.videoWidth;
+                captureCanvas.height = video.videoHeight;
+                context.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
+
+                detectColorsAndApply(context);
+            });
+
+            window.addEventListener('keydown', (e) => {
+                if (video.srcObject && !captureFaceBtn.disabled && e.code === 'Space') {
+                    e.preventDefault();
+                    captureFaceBtn.click();
+                }
+            });
+
+            function getClosestColor(r, g, b) {
+                let closestColor = 'white';
+                let minDistance = Infinity;
+                for (const colorName in COLORS) {
+                    const colorRgb = COLORS[colorName].rgb;
+                    const distance = Math.sqrt(Math.pow(r - colorRgb[0], 2) + Math.pow(g - colorRgb[1], 2) + Math.pow(b - colorRgb[2], 2));
+                    if (distance < minDistance) {
+                        minDistance = distance;
+                        closestColor = colorName;
+                    }
+                }
+                return closestColor;
+            }
+
+            function detectColorsAndApply(context) {
+                const width = context.canvas.width;
+                const height = context.canvas.height;
+                const size = Math.min(width, height) * 0.8;
+                const offsetX = (width - size) / 2;
+                const offsetY = (height - size) / 2;
+                const samplePoints = getSamplePoints(size, offsetX, offsetY);
+                const detectedColors = [];
+
+                for (const point of samplePoints) {
+                    const pixelData = context.getImageData(point.x, point.y, 1, 1).data;
+                    detectedColors.push(getClosestColor(pixelData[0], pixelData[1], pixelData[2]));
+                }
+
+                const centerColorName = detectedColors[4];
+                const detectedFace = COLORS[centerColorName].face;
+                if (!detectedFace) {
+                    alert(`Could not determine face from center color: ${centerColorName}`);
+                    return;
+                }
+                applyDetectedColors(detectedColors, detectedFace);
+            }
+
+            function applyDetectedColors(colors, face) {
+                const stickersToUpdate = sortFace(face, allStickers.filter(s => s.userData.face === face));
+                if (stickersToUpdate.length === colors.length) {
+                    for (let i = 0; i < 9; i++) {
+                        if (!stickersToUpdate[i].userData.isCenter) {
+                            const colorName = colors[i];
+                            stickersToUpdate[i].material = stickerMaterials[colorName];
+                            stickersToUpdate[i].userData.color = colorName;
+                        }
+                    }
+                } else {
+                    alert("Error: Could not find 9 stickers for the selected face.");
+                }
+            }
+
+            function sortFace(face, stickers) {
+                switch (face) {
+                    case 'U': return stickers.sort((a, b) => (a.parent.position.z - b.parent.position.z) || (a.parent.position.x - b.parent.position.x));
+                    case 'R': return stickers.sort((a, b) => (b.parent.position.y - a.parent.position.y) || (b.parent.position.z - a.parent.position.z));
+                    case 'F': return stickers.sort((a, b) => (b.parent.position.y - a.parent.position.y) || (a.parent.position.x - b.parent.position.x));
+                    case 'D': return stickers.sort((a, b) => (b.parent.position.z - a.parent.position.z) || (a.parent.position.x - b.parent.position.x));
+                    case 'L': return stickers.sort((a, b) => (b.parent.position.y - a.parent.position.y) || (a.parent.position.z - b.parent.position.z));
+                    case 'B': return stickers.sort((a, b) => (b.parent.position.y - a.parent.position.y) || (b.parent.position.x - a.parent.position.x));
+                    default: return stickers;
+                }
+            }
+
+            function extractCubeState() {
+                const faceNames = ['U', 'R', 'F', 'D', 'L', 'B'];
+                const state = {};
+                for (const face of faceNames) {
+                    const stickersForFace = allStickers.filter(s => s.userData.face === face);
+                    const sortedStickers = sortFace(face, stickersForFace);
+                    if (sortedStickers.length !== 9) {
+                        alert(`Error: Face ${face} has ${sortedStickers.length} stickers, but should have 9.`);
+                        return null;
+                    }
+                    state[face] = sortedStickers.map(sticker => sticker.userData.color);
+                }
+                return state;
+            }
+
+            document.getElementById('solve-btn').addEventListener('click', async () => {
+                const cubeState = extractCubeState();
+                if (!cubeState) return;
+
+                const response = await fetch("{% url 'cube_solver:solve_cube_api' %}", {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+                    body: JSON.stringify({ state: cubeState })
+                });
+                const result = await response.json();
+                if (result.status === 'success') {
+                    window.location.href = result.redirect_url;
+                } else {
+                    const errorMessage = result.error || 'Could not solve.';
+                    const defString = result.definition_string ? `\n\nGenerated String:\n${result.definition_string}` : '';
+                    alert(`Error: ${errorMessage}${defString}`);
+                }
+            });
+
+            (function animate() {
+                requestAnimationFrame(animate);
+                renderer.render(scene, camera);
+            })();
+        });
+    </script>
+</body>
+
+</html>

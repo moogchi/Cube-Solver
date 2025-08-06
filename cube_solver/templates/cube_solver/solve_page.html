@@ -1,0 +1,350 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solution Steps</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            background-color: #121212;
+            color: #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 1rem;
+        }
+
+        #header {
+            width: 100%;
+            max-width: 900px;
+            text-align: center;
+            margin-bottom: 1rem;
+        }
+
+        .solution-box {
+            background-color: #2a2a2a;
+            padding: 1rem;
+            border-radius: 8px;
+            font-family: 'Courier New', Courier, monospace;
+            word-wrap: break-word;
+            margin-bottom: 1rem;
+        }
+
+        #main-content {
+            display: flex;
+            gap: 2rem;
+            align-items: flex-start;
+        }
+
+        #cube-container {
+            width: 60vw;
+            max-width: 500px;
+            height: 60vh;
+            max-height: 500px;
+            border: 1px solid #333;
+            border-radius: 8px;
+        }
+
+        #controls {
+            width: 250px;
+            padding-top: 2rem;
+        }
+
+        .control-group {
+            margin-bottom: 1.5rem;
+        }
+
+        button {
+            width: 100%;
+            padding: 12px;
+            font-size: 1rem;
+            border-radius: 5px;
+            border: none;
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+            margin-top: 0.5rem;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        button:disabled {
+            background-color: #555;
+            cursor: not-allowed;
+        }
+
+        #current-move {
+            font-size: 2rem;
+            font-weight: bold;
+            text-align: center;
+            padding: 1rem;
+            background-color: #2a2a2a;
+            border-radius: 8px;
+            min-height: 60px;
+        }
+
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="header">
+        <h4>Definition String Sent to Solver</h4>
+        <div id="definition-string" class="solution-box">{{ definition_string }}</div>
+        <h4>Full Solution</h4>
+        <div id="full-solution" class="solution-box">{{ solution_str }}</div>
+    </div>
+    <div id="main-content">
+        <div id="cube-container"></div>
+        <div id="controls">
+            <div class="control-group">
+                <h3>Current Move</h3>
+                <div id="current-move">Press Space</div>
+            </div>
+            <div class="control-group">
+                <button id="next-btn">Next Move (Space)</button>
+                <button id="prev-btn">Previous Move</button>
+            </div>
+            <div class="control-group">
+                <button id="auto-btn">Auto-Play</button>
+                <div class="slider-container">
+                    <label for="speed-slider">Speed:</label>
+                    <input type="range" id="speed-slider" min="2" max="2000" value="1000" step="2">
+                </div>
+            </div>
+            <div class="control-group">
+                <a href="{% url 'cube_solver:index' %}"><button>Solve Another Cube</button></a>
+            </div>
+        </div>
+    </div>
+
+    {{ solution|json_script:"solution-data" }}
+    <script id="initial-state-data" type="application/json">{{ initial_state_json|safe }}</script>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tween.js/18.6.4/tween.umd.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const solutionMoves = JSON.parse(document.getElementById('solution-data').textContent);
+            const initialCubeState = JSON.parse(document.getElementById('initial-state-data').textContent);
+            const container = document.getElementById('cube-container');
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x121212);
+            const camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
+            const renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            container.appendChild(renderer.domElement);
+            const controls = new THREE.OrbitControls(camera, renderer.domElement);
+            camera.position.set(3.5, 3, 4.5);
+            controls.update();
+            scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+            scene.add(new THREE.DirectionalLight(0xffffff, 0.6).position.set(5, 10, 7.5));
+            const cubeGroup = new THREE.Group();
+            scene.add(cubeGroup);
+            const COLORS = { white: 0xffffff, yellow: 0xffff00, blue: 0x0000ff, green: 0x008000, red: 0x9E4242, orange: 0xffb84d };
+            const stickerMaterials = {};
+            for (const colorName in COLORS) {
+                stickerMaterials[colorName] = new THREE.MeshLambertMaterial({ color: COLORS[colorName] });
+            }
+            const allStickers = [];
+            const cubies = [];
+            const stickerSize = 0.9;
+            const stickerGeometry = new THREE.PlaneGeometry(stickerSize, stickerSize);
+
+            function createSticker(defaultColor, position, rotation, face) {
+                const sticker = new THREE.Mesh(stickerGeometry, stickerMaterials[defaultColor]);
+                sticker.position.set(position.x, position.y, position.z);
+                sticker.rotation.set(rotation.x, rotation.y, rotation.z);
+                sticker.userData = { defaultColor: defaultColor, face: face };
+                allStickers.push(sticker);
+                return sticker;
+            }
+
+            const faceDefinitions = [
+                { id: 'U', axis: 'y', val: 1, pos: { y: 0.51 }, rot: { x: -Math.PI / 2 }, color: 'white' },
+                { id: 'D', axis: 'y', val: -1, pos: { y: -0.51 }, rot: { x: Math.PI / 2 }, color: 'yellow' },
+                { id: 'R', axis: 'x', val: 1, pos: { x: 0.51 }, rot: { y: Math.PI / 2 }, color: 'red' },
+                { id: 'L', axis: 'x', val: -1, pos: { x: -0.51 }, rot: { y: -Math.PI / 2 }, color: 'orange' },
+                { id: 'F', axis: 'z', val: 1, pos: { z: 0.51 }, rot: { x: 0, y: 0, z: 0 }, color: 'green' },
+                { id: 'B', axis: 'z', val: -1, pos: { z: -0.51 }, rot: { x: Math.PI, y: 0, z: 0 }, color: 'blue' }
+            ];
+
+            for (let x = -1; x <= 1; x++) {
+                for (let y = -1; y <= 1; y++) {
+                    for (let z = -1; z <= 1; z++) {
+                        if (x === 0 && y === 0 && z === 0) continue;
+                        const cubie = new THREE.Group();
+                        cubie.position.set(x, y, z);
+                        for (const def of faceDefinitions) {
+                            if ({ x, y, z }[def.axis] === def.val) {
+                                const pos = { x: def.pos.x || 0, y: def.pos.y || 0, z: def.pos.z || 0 };
+                                const rot = { x: def.rot.x || 0, y: def.rot.y || 0, z: def.rot.z || 0 };
+                                cubie.add(createSticker(def.color, pos, rot, def.id));
+                            }
+                        }
+                        cubies.push(cubie);
+                        cubeGroup.add(cubie);
+                    }
+                }
+            }
+
+            // This function now perfectly matches the one in index.html
+            function sortFace(face, stickers) {
+                switch (face) {
+                    case 'U': return stickers.sort((a, b) => (a.parent.position.z - b.parent.position.z) || (a.parent.position.x - b.parent.position.x));
+                    case 'R': return stickers.sort((a, b) => (b.parent.position.y - a.parent.position.y) || (b.parent.position.z - a.parent.position.z));
+                    case 'F': return stickers.sort((a, b) => (b.parent.position.y - a.parent.position.y) || (a.parent.position.x - b.parent.position.x));
+                    case 'D': return stickers.sort((a, b) => (b.parent.position.z - a.parent.position.z) || (a.parent.position.x - b.parent.position.x));
+                    case 'L': return stickers.sort((a, b) => (b.parent.position.y - a.parent.position.y) || (a.parent.position.z - b.parent.position.z));
+                    case 'B': return stickers.sort((a, b) => (b.parent.position.y - a.parent.position.y) || (b.parent.position.x - a.parent.position.x));
+                    default: return stickers;
+                }
+            }
+
+            const faceNames = ['U', 'R', 'F', 'D', 'L', 'B'];
+            const faceStickers = {};
+            for (const face of faceNames) {
+                faceStickers[face] = sortFace(face, allStickers.filter(s => s.userData.face === face));
+            }
+
+            for (const face in initialCubeState) {
+                const stickers = faceStickers[face];
+                const colors = initialCubeState[face];
+                if (stickers && colors && stickers.length === colors.length) {
+                    for (let i = 0; i < stickers.length; i++) {
+                        if (colors[i] && stickerMaterials[colors[i]]) {
+                            stickers[i].material = stickerMaterials[colors[i]];
+                        }
+                    }
+                }
+            }
+
+            let currentMoveIndex = -1;
+            let isAnimating = false;
+            let autoPlayInterval = null;
+            const nextBtn = document.getElementById('next-btn');
+            const prevBtn = document.getElementById('prev-btn');
+            const autoBtn = document.getElementById('auto-btn');
+            const speedSlider = document.getElementById('speed-slider');
+            const currentMoveEl = document.getElementById('current-move');
+
+            function getCubiesForFace(face) {
+                const axisMap = { 'U': 'y', 'D': 'y', 'R': 'x', 'L': 'x', 'F': 'z', 'B': 'z' };
+                const positionMap = { 'U': 1, 'D': -1, 'R': 1, 'L': -1, 'F': 1, 'B': -1 };
+                const axis = axisMap[face];
+                const position = positionMap[face];
+                return cubies.filter(c => Math.abs(c.position[axis] - position) < 0.1);
+            }
+
+            function animateMove(move, reverse = false) {
+                if (isAnimating) return;
+                isAnimating = true;
+                const face = move[0].toUpperCase();
+                const turns = move.length > 1 && move[1] === '2' ? 2 : 1;
+                let angle = (Math.PI / 2) * turns;
+                if (move.length > 1 && move[1] === "'") { angle = -Math.PI / 2; }
+                if (reverse) { angle = -angle; }
+                const axisMap = { 'U': 'y', 'D': 'y', 'R': 'x', 'L': 'x', 'F': 'z', 'B': 'z' };
+                const axis = axisMap[face];
+                let angleDirection = 1;
+                if (['U', 'R', "F"].includes(face)) { angleDirection = -1; }
+                const finalAngle = angle * angleDirection;
+                const pivot = new THREE.Group();
+                scene.add(pivot);
+                const faceCubies = getCubiesForFace(face);
+                faceCubies.forEach(c => pivot.attach(c));
+                new TWEEN.Tween(pivot.rotation)
+                    .to({ [axis]: finalAngle }, 400)
+                    .easing(TWEEN.Easing.Quadratic.InOut)
+                    .onComplete(() => {
+                        pivot.updateMatrixWorld();
+                        faceCubies.forEach(c => { cubeGroup.attach(c); });
+                        scene.remove(pivot);
+                        isAnimating = false;
+                        updateUI();
+                    })
+                    .start();
+            }
+
+            function updateUI() {
+                currentMoveEl.textContent = currentMoveIndex >= 0 ? solutionMoves[currentMoveIndex] : "Start";
+                prevBtn.disabled = isAnimating || currentMoveIndex < 0;
+                nextBtn.disabled = isAnimating || currentMoveIndex >= solutionMoves.length - 1;
+                if (currentMoveIndex >= solutionMoves.length - 1) {
+                    if (autoPlayInterval) stopAutoPlay();
+                    currentMoveEl.textContent = "Done!";
+                }
+            }
+
+            function handleNextMove() {
+                if (isAnimating || currentMoveIndex >= solutionMoves.length - 1) return;
+                currentMoveIndex++;
+                animateMove(solutionMoves[currentMoveIndex]);
+            }
+
+            function handlePrevMove() {
+                if (isAnimating || currentMoveIndex < 0) return;
+                animateMove(solutionMoves[currentMoveIndex], true);
+                currentMoveIndex--;
+            }
+
+            function startAutoPlay() {
+                if (currentMoveIndex >= solutionMoves.length - 1) return;
+                autoBtn.textContent = 'Stop';
+                autoBtn.style.backgroundColor = '#dc3545';
+                handleNextMove();
+                autoPlayInterval = setInterval(() => {
+                    handleNextMove();
+                }, 2002 - speedSlider.value);
+            }
+
+            function stopAutoPlay() {
+                clearInterval(autoPlayInterval);
+                autoPlayInterval = null;
+                autoBtn.textContent = 'Auto-Play';
+                autoBtn.style.backgroundColor = '#007bff';
+            }
+
+            nextBtn.addEventListener('click', handleNextMove);
+            prevBtn.addEventListener('click', handlePrevMove);
+            autoBtn.addEventListener('click', () => {
+                if (autoPlayInterval) stopAutoPlay();
+                else startAutoPlay();
+            });
+            speedSlider.addEventListener('input', () => {
+                if (autoPlayInterval) { stopAutoPlay(); startAutoPlay(); }
+            });
+            window.addEventListener('keydown', (e) => {
+                if (e.code === 'Space' && e.target === document.body) {
+                    e.preventDefault();
+                    if (autoPlayInterval) { stopAutoPlay(); }
+                    else { handleNextMove(); }
+                }
+            });
+
+            document.body.focus();
+            updateUI();
+
+            function animate() {
+                requestAnimationFrame(animate);
+                TWEEN.update();
+                controls.update();
+                renderer.render(scene, camera);
+            }
+            animate();
+        });
+    </script>
+</body>
+
+</html>
